@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -255,8 +256,7 @@ func loadConfig() (*config, error) {
 	var configFile = path.Join(os.Getenv("USERPROFILE"), ".bluesky.json")
 	f, err := os.Open(configFile)
 	if err != nil {
-		log.Printf("Open error: config file '%s'", configFile)
-		return nil, err
+		return nil, fmt.Errorf("cannot load config file: %w", err)
 	}
 	defer f.Close()
 
