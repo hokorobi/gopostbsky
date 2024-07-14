@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -62,8 +63,7 @@ func main() {
 		dec := json.NewDecoder(f)
 		dec.Decode(&d)
 	} else {
-		log.Fatal("Open error: config file '~/.bluesky.json'")
-		os.Exit(1)
+		log.Fatal(fmt.Sprintf("Open error: config file '%s'", ConfigFile))
 	}
 
 	input := &atproto.ServerCreateSession_Input{
