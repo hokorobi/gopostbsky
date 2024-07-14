@@ -5,7 +5,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -56,19 +55,14 @@ func main() {
 
 	// セッションを作成するための入力データを準備します。
 
-	var ConfigFile = path.Join(os.Getenv("USERPROFILE"), ".bluesky.json")
-	// load config
-	var d config
-	if f, e := os.Open(ConfigFile); e == nil {
-		dec := json.NewDecoder(f)
-		dec.Decode(&d)
-	} else {
-		log.Fatal(fmt.Sprintf("Open error: config file '%s'", ConfigFile))
+	cfg, err := loadConfig()
+	if err != nil {
+		log.Fatal(err)
 	}
 
 	input := &atproto.ServerCreateSession_Input{
-		Identifier: d.Identifier, // Blueskyのハンドル名(xxxxx.bsky.social)
-		Password:   d.Password,   // Blueskyのパスワード
+		Identifier: cfg.Identifier, // Blueskyのハンドル名(xxxxx.bsky.social)
+		Password:   cfg.Password,   // Blueskyのパスワード
 	}
 	// セッション作成のリクエストを送信し、結果を受け取ります。
 	output, err := atproto.ServerCreateSession(context.TODO(), cli, input)
@@ -255,4 +249,19 @@ func addLink(xrpcc *xrpc.Client, post *bsky.FeedPost, link string) {
 		MimeType: http.DetectContentType(b),
 		Size:     resp2.Blob.Size,
 	}
+}
+
+func loadConfig() (*config, error) {
+	var configFile = path.Join(os.Getenv("USERPROFILE"), ".bluesky.json")
+	f, err := os.Open(configFile)
+	if err != nil {
+		log.Printf("Open error: config file '%s'", configFile)
+		return nil, err
+	}
+	defer f.Close()
+
+	dec := json.NewDecoder(f)
+	var cfg config
+	dec.Decode(&cfg)
+	return &cfg, nil
 }
