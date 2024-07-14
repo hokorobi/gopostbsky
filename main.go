@@ -103,26 +103,26 @@ func main() {
 	}
 
 	// テキストからリンクを抽出し、投稿データに追加します。
-	entryies := extractLinksBytes(text)
-	if len(entryies) > 0 {
-		for _, entry := range entryies {
-			post.Facets = append(post.Facets, &bsky.RichtextFacet{
-				Features: []*bsky.RichtextFacet_Features_Elem{
-					{
-						RichtextFacet_Link: &bsky.RichtextFacet_Link{
-							Uri: entry.text,
-						},
+	for _, entry := range extractLinksBytes(text) {
+		post.Facets = append(post.Facets, &bsky.RichtextFacet{
+			Features: []*bsky.RichtextFacet_Features_Elem{
+				{
+					RichtextFacet_Link: &bsky.RichtextFacet_Link{
+						Uri: entry.text,
 					},
 				},
-				Index: &bsky.RichtextFacet_ByteSlice{
-					ByteStart: entry.start,
-					ByteEnd:   entry.end,
-				},
-			})
+			},
+			Index: &bsky.RichtextFacet_ByteSlice{
+				ByteStart: entry.start,
+				ByteEnd:   entry.end,
+			},
+		})
+		if post.Embed == nil {
+			post.Embed = &bsky.FeedPost_Embed{}
 		}
-		// 最初のリンクを投稿に埋め込むための追加処理を行います。
-		post.Embed = &bsky.FeedPost_Embed{}
-		addLink(cli, post, entryies[0].text)
+		if post.Embed.EmbedExternal == nil {
+			addLink(cli, post, entry.text)
+		}
 	}
 
 	inp := &atproto.RepoCreateRecord_Input{
@@ -179,8 +179,8 @@ func addLink(xrpcc *xrpc.Client, post *bsky.FeedPost, link string) {
 	br := bufio.NewReader(res.Body)
 	var reader io.Reader = br
 
-	data, err2 := br.Peek(1024)
-	if err2 == nil {
+	data, err := br.Peek(1024)
+	if err == nil {
 		enc, name, _ := charset.DetermineEncoding(data, res.Header.Get("content-type"))
 		if enc != nil {
 			reader = enc.NewDecoder().Reader(br)
