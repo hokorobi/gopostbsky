@@ -43,6 +43,11 @@ type config struct {
 }
 
 func main() {
+	if len(os.Args) < 2 {
+		log.Print("needs arguments.")
+		os.Exit(1)
+	}
+	text := strings.Join(os.Args[1:], " ")
 	// Bluesky APIにアクセスするためのクライアントを初期化します。
 	cli := &xrpc.Client{
 		Host: "https://bsky.social",
@@ -79,12 +84,10 @@ func main() {
 	}
 
 	// ここで投稿データを作成します
-	text := "hoge https://bsky.app #hoge" // URLあり、ハッシュタグありの投稿テキストを用意する
 	post := &bsky.FeedPost{
 		Text:      text,                            // 投稿テキスト
 		CreatedAt: time.Now().Format(time.RFC3339), // 投稿日時
 		Langs:     []string{"ja"},                  // 言語設定
-		// Embed:     &bsky.FeedPost_Embed{},          // 埋め込みデータ
 	}
 
 	// テキストからタグを抽出し、投稿データに追加します。
@@ -123,7 +126,10 @@ func main() {
 			})
 		}
 		// 最初のリンクを投稿に埋め込むための追加処理を行います。
-		// addLink(cli, post, entryies[0].text)
+		if len(entryies) > 0 {
+			post.Embed = &bsky.FeedPost_Embed{}
+			addLink(cli, post, entryies[0].text)
+		}
 	}
 
 	inp := &atproto.RepoCreateRecord_Input{
@@ -172,72 +178,73 @@ func extractLinksBytes(text string) []entry {
 // 投稿データに外部リンクの詳細（タイトル、説明、サムネイル画像）を追加する関数です。
 func addLink(xrpcc *xrpc.Client, post *bsky.FeedPost, link string) {
 	res, _ := http.Get(link)
-	if res != nil {
-		defer res.Body.Close()
+	if res == nil {
+		return
+	}
+	defer res.Body.Close()
 
-		br := bufio.NewReader(res.Body)
-		var reader io.Reader = br
+	br := bufio.NewReader(res.Body)
+	var reader io.Reader = br
 
-		data, err2 := br.Peek(1024)
-		if err2 == nil {
-			enc, name, _ := charset.DetermineEncoding(data, res.Header.Get("content-type"))
+	data, err2 := br.Peek(1024)
+	if err2 == nil {
+		enc, name, _ := charset.DetermineEncoding(data, res.Header.Get("content-type"))
+		if enc != nil {
+			reader = enc.NewDecoder().Reader(br)
+		} else if len(name) > 0 {
+			enc := encoding.GetEncoding(name)
 			if enc != nil {
 				reader = enc.NewDecoder().Reader(br)
-			} else if len(name) > 0 {
-				enc := encoding.GetEncoding(name)
-				if enc != nil {
-					reader = enc.NewDecoder().Reader(br)
-				}
 			}
 		}
+	}
 
-		var title string
-		var description string
-		var imgURL string
-		doc, err := goquery.NewDocumentFromReader(reader)
-		if err == nil {
-			title = doc.Find(`title`).Text()
-			description, _ = doc.Find(`meta[property="description"]`).Attr("content")
-			imgURL, _ = doc.Find(`meta[property="og:image"]`).Attr("content")
+	var title string
+	var description string
+	var imgURL string
+	doc, err := goquery.NewDocumentFromReader(reader)
+	if err == nil {
+		title = doc.Find(`title`).Text()
+		description, _ = doc.Find(`meta[property="description"]`).Attr("content")
+		imgURL, _ = doc.Find(`meta[property="og:image"]`).Attr("content")
+		if title == "" {
+			title, _ = doc.Find(`meta[property="og:title"]`).Attr("content")
 			if title == "" {
-				title, _ = doc.Find(`meta[property="og:title"]`).Attr("content")
-				if title == "" {
-					title = link
-				}
-			}
-			if description == "" {
-				description, _ = doc.Find(`meta[property="og:description"]`).Attr("content")
-				if description == "" {
-					description = link
-				}
-			}
-			post.Embed.EmbedExternal = &bsky.EmbedExternal{
-				External: &bsky.EmbedExternal_External{
-					Description: description,
-					Title:       title,
-					Uri:         link,
-				},
-			}
-		} else {
-			post.Embed.EmbedExternal = &bsky.EmbedExternal{
-				External: &bsky.EmbedExternal_External{
-					Uri: link,
-				},
+				title = link
 			}
 		}
-		if imgURL != "" && post.Embed.EmbedExternal != nil {
-			resp, err := http.Get(imgURL)
-			if err == nil && resp.StatusCode == http.StatusOK {
-				defer resp.Body.Close()
-				b, err := io.ReadAll(resp.Body)
+		if description == "" {
+			description, _ = doc.Find(`meta[property="og:description"]`).Attr("content")
+			if description == "" {
+				description = link
+			}
+		}
+		post.Embed.EmbedExternal = &bsky.EmbedExternal{
+			External: &bsky.EmbedExternal_External{
+				Description: description,
+				Title:       title,
+				Uri:         link,
+			},
+		}
+	} else {
+		post.Embed.EmbedExternal = &bsky.EmbedExternal{
+			External: &bsky.EmbedExternal_External{
+				Uri: link,
+			},
+		}
+	}
+	if imgURL != "" && post.Embed.EmbedExternal != nil {
+		resp, err := http.Get(imgURL)
+		if err == nil && resp.StatusCode == http.StatusOK {
+			defer resp.Body.Close()
+			b, err := io.ReadAll(resp.Body)
+			if err == nil {
+				resp, err := comatproto.RepoUploadBlob(context.TODO(), xrpcc, bytes.NewReader(b))
 				if err == nil {
-					resp, err := comatproto.RepoUploadBlob(context.TODO(), xrpcc, bytes.NewReader(b))
-					if err == nil {
-						post.Embed.EmbedExternal.External.Thumb = &lexutil.LexBlob{
-							Ref:      resp.Blob.Ref,
-							MimeType: http.DetectContentType(b),
-							Size:     resp.Blob.Size,
-						}
+					post.Embed.EmbedExternal.External.Thumb = &lexutil.LexBlob{
+						Ref:      resp.Blob.Ref,
+						MimeType: http.DetectContentType(b),
+						Size:     resp.Blob.Size,
 					}
 				}
 			}
