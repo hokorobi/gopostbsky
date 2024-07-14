@@ -233,19 +233,26 @@ func addLink(xrpcc *xrpc.Client, post *bsky.FeedPost, link string) {
 	if imgURL == "" || post.Embed.EmbedExternal == nil {
 		return
 	}
+
 	resp, err := http.Get(imgURL)
-	if err == nil && resp.StatusCode == http.StatusOK {
-		defer resp.Body.Close()
-		b, err := io.ReadAll(resp.Body)
-		if err == nil {
-			resp, err := comatproto.RepoUploadBlob(context.TODO(), xrpcc, bytes.NewReader(b))
-			if err == nil {
-				post.Embed.EmbedExternal.External.Thumb = &lexutil.LexBlob{
-					Ref:      resp.Blob.Ref,
-					MimeType: http.DetectContentType(b),
-					Size:     resp.Blob.Size,
-				}
-			}
-		}
+	if err != nil || resp.StatusCode != http.StatusOK {
+		return
+	}
+
+	defer resp.Body.Close()
+	b, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return
+	}
+
+	resp2, err := comatproto.RepoUploadBlob(context.TODO(), xrpcc, bytes.NewReader(b))
+	if err != nil {
+		return
+	}
+
+	post.Embed.EmbedExternal.External.Thumb = &lexutil.LexBlob{
+		Ref:      resp2.Blob.Ref,
+		MimeType: http.DetectContentType(b),
+		Size:     resp2.Blob.Size,
 	}
 }
